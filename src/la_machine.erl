@@ -719,43 +719,15 @@ change_moodp(Mood, player, GestureCount, _Total_Gesture_Count, _SecondsElapsed, 
     atom(), non_neg_integer(), non_neg_integer() | undefined, la_machine_configuration:config()
 ) ->
     pos_integer().
-play_mood(imitation, ElapsedSeconds, LastPlaySeq, Config) ->
-    Mood = imitation,
-    io:format("playing mood : ~s ElapsedSeconds=~p\n", [Mood, ElapsedSeconds]),
-
-    MoodScenar =
-        if
-            ElapsedSeconds =< ?GAME_SHORT_DUR_S ->
-                game_short;
-            ElapsedSeconds =< ?GAME_MEDIUM_DUR_S ->
-                game_medium;
-            true ->
-                game_long
-        end,
-    play_random_scenario_with_hit(MoodScenar, LastPlaySeq, Config);
-play_mood(dialectic, ElapsedSeconds, LastPlaySeq, Config) ->
-    Mood = dialectic,
-    io:format("playing mood : ~s ElapsedSeconds=~p\n", [Mood, ElapsedSeconds]),
-    % play inverse
-    MoodScenar =
-        if
-            ElapsedSeconds =< ?GAME_MEDIUM_DUR_S ->
-                game_long;
-            true ->
-                game_short
-        end,
-    play_random_scenario_with_hit(MoodScenar, LastPlaySeq, Config);
-% calling (no hit)
+% calling (no hit) - machine seeks attention with original sounds
 play_mood(calling, _ElapsedSeconds, LastPlaySeq, Config) ->
     Mood = calling,
     io:format("playing mood : ~s\n", [Mood]),
-    MoodScenar = Mood,
-    play_random_scenario(MoodScenar, LastPlaySeq, Config);
-% all others : joy, calm, tired, upset, excited
+    play_random_scenario(Mood, LastPlaySeq, Config);
+% button press : all moods (joy, calm, tired, upset, excited, imitation, dialectic) -> joy (champions league)
 play_mood(Mood, _ElapsedSeconds, LastPlaySeq, Config) ->
-    io:format("playing mood : ~s\n", [Mood]),
-    MoodScenar = Mood,
-    play_random_scenario_with_hit(MoodScenar, LastPlaySeq, Config).
+    io:format("playing mood : ~s (-> joy)\n", [Mood]),
+    play_random_scenario_with_hit(joy, LastPlaySeq, Config).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% play_meuh
@@ -769,7 +741,7 @@ play_meuh(Config) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 -spec play_poke(la_machine_configuration:config()) -> pos_integer().
 play_poke(Config) ->
-    play_random_scenario(poke, undefined, Config).
+    play_random_scenario(joy, undefined, Config).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% play_battery_low
