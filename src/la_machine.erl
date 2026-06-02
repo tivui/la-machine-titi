@@ -841,26 +841,8 @@ play_scenario(MoodScenar, ScenarioIx, Config) ->
     pos_integer().
 play_scenario_with_hit(MoodScenar, ScenarioIx, Config) ->
     Scenario = la_machine_scenarios:get(MoodScenar, ScenarioIx),
-    % add random wait at beginning if game_*
-    InitialWait =
-        if
-            MoodScenar =:= game_short orelse MoodScenar =:= game_medium orelse
-                MoodScenar =:= game_long ->
-                MinWait = 0,
-                MaxWait = 1200,
-                <<RandS:56>> = crypto:strong_rand_bytes(7),
-                WaitDelay = (MinWait + (RandS rem (MaxWait - MinWait))),
-                WaitDelay;
-            true ->
-                0
-        end,
-    ScenarioWithInitialWait =
-        if
-            InitialWait > 0 -> [{wait, InitialWait}] ++ Scenario;
-            true -> Scenario
-        end,
     {ok, Pid} = la_machine_player:start_link(Config),
-    ok = la_machine_player:play(Pid, ScenarioWithInitialWait),
+    ok = la_machine_player:play(Pid, Scenario),
     % play hit if needed
     ButtonState = read_button(),
     io:format("   after play ButtonState=~s\n", [ButtonState]),
