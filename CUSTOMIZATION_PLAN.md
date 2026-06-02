@@ -68,16 +68,27 @@ Le processus passe par `rebar3` et `scripts/build_assets.escript`.
 
 ### 6. Flasher le device
 
-Deux options :
+**Important** : si tu modifies les sons (ajout, suppression ou modification d'un fichier MP3), l'index des sons est recompilé et intégré dans le code Erlang. Il faut donc toujours flasher **deux partitions** :
+- Le code Erlang (`la_machine.avm`) à l'offset `0x130000`
+- La partition sons (`sounds.bin`) à l'offset `0x230000`
 
-- Flash complet : image entière contenant le code et les sons
-- Flash partition sons seule : uniquement la partition sonore
-
-Exemple pour la partition sons :
+La solution la plus simple est de flasher l'image complète (produite par la CI GitHub Actions) :
 
 ```bash
+esptool.py --chip esp32c3 --port COM3 write_flash 0 la_machine.img
+```
+
+Ou les deux partitions séparément (si tu veux éviter de relancer le self-test) :
+
+```bash
+# 1. Code Erlang (contient l'index des sons)
+rebar3 atomvm esp32_flash -p COM3 -o 0x130000
+
+# 2. Partition sons
 esptool.py --chip esp32c3 --port COM3 write_flash 0x230000 _build/generated/sounds.bin
 ```
+
+> Note : flasher l'image complète (`write_flash 0`) réinitialise la NVS (calibration) et déclenche le self-test au prochain boot. Les deux partitions séparément préservent la calibration.
 
 ### 7. Tester et revenir en arrière
 
