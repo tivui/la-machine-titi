@@ -52,13 +52,13 @@
 -ifdef(TEST).
 count_test_() ->
     [
-        ?_assert(count(excited) > 0),
+        ?_assert(count(joy) > 0),
         ?_assertEqual(0, count(unknown))
     ].
 
 get_test_() ->
     [
-        ?_assert(is_list(get(excited, 1)))
+        ?_assert(is_list(get(joy, 1)))
     ].
 
 %% All known scenario types. Update this list when adding a new type.

@@ -1,5 +1,5 @@
 {
-  "joy_champions_01": "{servo, 0}, {mp3, <<\"personal/champions-league.mp3\">>}, {wait, 4000}, {servo, 60, 3000}, {wait, 4000}, {servo, 85}, {wait, 2000}, {servo, 60}, {wait, 3000}, {servo, 85}, {wait, 3000}, {wait, sound}, {servo, 0, 2000}",
+  "joy_01": "{servo, 0}, {mp3, <<\"personal/champions-league.mp3\">>}, {wait, 4000}, {servo, 60, 3000}, {wait, 4000}, {servo, 85}, {wait, 2000}, {servo, 60}, {wait, 3000}, {servo, 85}, {wait, 3000}, {wait, sound}, {servo, 0, 2000}",
   "calling_00099": "{mp3, <<\"calling/00099.mp3\">>}",
   "calling_00140": "{mp3, <<\"calling/00140.mp3\">>}",
   "calling_00145": "{mp3, <<\"calling/00145.mp3\">>}",
