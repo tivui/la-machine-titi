@@ -1,5 +1,5 @@
 {
-  "joy_01": "{servo, 0}, {mp3, <<\"personal/champions-league.mp3\">>}, {wait, 4000}, {servo, 60, 3000}, {wait, 4000}, {servo, 85}, {wait, 2000}, {servo, 60}, {wait, 3000}, {servo, 85}, {wait, 3000}, {wait, sound}, {servo, 100}, {wait, 300}, {servo, 0, 1500}",
+  "joy_01": "{servo, 0}, {mp3, <<\"personal/champions-league.mp3\">>}, {wait, 1000}, {servo, 20, 1000}, {wait, 1200}, {servo, 55, 800}, {wait, 1000}, {servo, 70}, {wait, 800}, {servo, 35, 400}, {wait, 500}, {servo, 85, 800}, {wait, 1000}, {servo, 95}, {wait, 900}, {servo, 60, 500}, {wait, 700}, {servo, 75}, {wait, 1000}, {servo, 80}, {wait, 1200}, {servo, 70, 400}, {wait, 600}, {servo, 85}, {wait, 700}, {servo, 45, 600}, {wait, 800}, {servo, 70}, {wait, 800}, {servo, 82}, {wait, 700}, {servo, 0, 400}, {wait, 500}, {servo, 100}, {wait, 1200}, {servo, 90}, {wait, 2500}, {servo, 65, 1500}, {wait, sound}, {servo, 100}, {wait, 300}, {servo, 0, 1500}",
   "calling_00099": "{mp3, <<\"calling/00099.mp3\">>}",
   "calling_00140": "{mp3, <<\"calling/00140.mp3\">>}",
   "calling_00145": "{mp3, <<\"calling/00145.mp3\">>}",
