@@ -70,9 +70,15 @@ jobs:
 
       - name: Generate choreographies.json
         run: |
-          echo "${{ inputs.choreographies_b64 }}" | base64 -d > choreographies.json
-          echo "Scenarios to compile:"
-          jq 'keys' choreographies.json
+          # Merge custom choreographies into the original file.
+          # Original has 170+ scenarios (system, calling, meuh, hits…) — we keep them all
+          # and override/add the theme's custom scenarios on top.
+          echo "${{ inputs.choreographies_b64 }}" | base64 -d > custom_choreos.json
+          jq -s '.[0] * .[1]' choreographies.json custom_choreos.json > merged.json
+          mv merged.json choreographies.json
+          echo "Total scenarios after merge: $(jq 'keys | length' choreographies.json)"
+          echo "Custom scenarios added:"
+          jq 'keys' custom_choreos.json
 
       - name: Sync sounds from S3
         run: |
