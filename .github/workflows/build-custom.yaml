@@ -1,0 +1,163 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build a custom firmware image from a ChoreographyTheme in La Machine Studio.
+# Triggered by the triggerBuild Lambda via workflow_dispatch.
+#
+# Prerequisites (one-time S3 setup):
+#   Run the standard build.yaml → download "la_machine-atomvm" artifact
+#   → upload to S3 firmware-base/:
+#     firmware-base/bootloader.bin
+#     firmware-base/atomvm-esp32.bin
+#     firmware-base/mkimage.erl
+#   Run: python $IDF_PATH/.../gen_esp32part.py image/partitions.csv image/partitions.bin
+#   → upload to S3 firmware-base/partitions.bin
+#
+# Required GitHub secrets in tivui/la-machine-titi:
+#   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, S3_BUCKET
+
+name: Build Custom Firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      theme_id:
+        description: 'ID of the ChoreographyTheme (DynamoDB)'
+        required: true
+      theme_name:
+        description: 'Display name of the theme'
+        required: true
+      choreographies_b64:
+        description: 'Base64-encoded choreographies.json  { [name]: erlangString }'
+        required: true
+      build_job_id:
+        description: 'BuildJob record ID to update in AppSync'
+        required: true
+      # NOTE: amplify_api_endpoint and amplify_api_key are stored as
+      # GitHub Actions secrets (AMPLIFY_API_ENDPOINT, AMPLIFY_API_KEY)
+      # so they are never visible in workflow run logs.
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    container: erlang:28
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: custom/mes_sons
+
+      - name: Install tools
+        run: |
+          apt-get update -q
+          apt-get install -y -q awscli curl jq
+
+      - name: Mark build as running
+        run: |
+          curl -sf -X POST "${{ secrets.AMPLIFY_API_ENDPOINT }}" \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: ${{ secrets.AMPLIFY_API_KEY }}" \
+            -d "$(jq -n \
+              --arg jobId "${{ inputs.build_job_id }}" \
+              --arg runId "${{ github.run_id }}" \
+              '{query: "mutation UpdateBuildJob($input: UpdateBuildJobInput!) { updateBuildJob(input: $input) { id } }",
+                variables: {input: {id: $jobId, status: "running", workflowRunId: $runId}}}')"
+
+      - name: Generate choreographies.json
+        run: |
+          # Merge custom choreographies into the original file.
+          # Original has 170+ scenarios (system, calling, meuh, hits…) — we keep them all
+          # and override/add the theme's custom scenarios on top.
+          echo "${{ inputs.choreographies_b64 }}" | base64 -d > custom_choreos.json
+          jq -s '.[0] * .[1]' choreographies.json custom_choreos.json > merged.json
+          mv merged.json choreographies.json
+          echo "Total scenarios after merge: $(jq 'keys | length' choreographies.json)"
+          echo "Custom scenarios added:"
+          jq 'keys' custom_choreos.json
+
+      - name: Sync sounds from S3
+        run: |
+          aws s3 sync "s3://${{ secrets.S3_BUCKET }}/sounds/" sounds/
+          echo "Sounds available: $(ls sounds/ | wc -l) directories/files"
+
+      - name: Compile (generates sounds.bin + HRL)
+        run: rebar3 compile
+
+      - name: Package AVM with atomvmlib
+        run: rebar3 atomvm packbeam -p -e ./atomvmlib.avm
+
+      - name: Download VM artifacts from S3 firmware-base/
+        run: |
+          mkdir -p image/build/bootloader
+          aws s3 cp "s3://${{ secrets.S3_BUCKET }}/firmware-base/bootloader.bin" image/build/bootloader/bootloader.bin
+          aws s3 cp "s3://${{ secrets.S3_BUCKET }}/firmware-base/atomvm-esp32.bin" image/build/atomvm-esp32.bin
+          aws s3 cp "s3://${{ secrets.S3_BUCKET }}/firmware-base/partitions.bin" image/partitions.bin
+          aws s3 cp "s3://${{ secrets.S3_BUCKET }}/firmware-base/mkimage.erl" image/mkimage.erl
+          ls -lh image/build/ image/partitions.bin image/mkimage.erl
+
+      - name: Assemble image directory
+        run: |
+          cp _build/default/lib/la_machine.avm image/la_machine.avm
+          cp _build/generated/sounds.bin image/sounds.bin
+          ls -lh image/
+
+      - name: Build firmware image
+        working-directory: image
+        run: |
+          escript mkimage.erl --root_dir . --config mkimage.config --out la_machine.img
+          ls -lh la_machine.img
+          SIZE_KB=$(du -k la_machine.img | cut -f1)
+          echo "IMAGE_SIZE_KB=$SIZE_KB" >> "$GITHUB_ENV"
+
+      - name: Upload firmware image to S3
+        run: |
+          aws s3 cp image/la_machine.img \
+            "s3://${{ secrets.S3_BUCKET }}/images/${{ inputs.theme_id }}/la_machine.img"
+
+      - name: Mark build as success + create ImageTheme
+        run: |
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+          IMAGE_S3_KEY="images/${{ inputs.theme_id }}/la_machine.img"
+
+          curl -sf -X POST "${{ secrets.AMPLIFY_API_ENDPOINT }}" \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: ${{ secrets.AMPLIFY_API_KEY }}" \
+            -d "$(jq -n \
+              --arg jobId "${{ inputs.build_job_id }}" \
+              --arg now "$NOW" \
+              --arg s3key "$IMAGE_S3_KEY" \
+              '{query: "mutation UpdateBuildJob($input: UpdateBuildJobInput!) { updateBuildJob(input: $input) { id } }",
+                variables: {input: {id: $jobId, status: "success", completedAt: $now, imageS3Key: $s3key}}}')"
+
+          curl -sf -X POST "${{ secrets.AMPLIFY_API_ENDPOINT }}" \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: ${{ secrets.AMPLIFY_API_KEY }}" \
+            -d "$(jq -n \
+              --arg name "${{ inputs.theme_name }}" \
+              --arg s3key "$IMAGE_S3_KEY" \
+              --arg themeId "${{ inputs.theme_id }}" \
+              --arg now "$NOW" \
+              --argjson sizeKb "$IMAGE_SIZE_KB" \
+              '{query: "mutation CreateImageTheme($input: CreateImageThemeInput!) { createImageTheme(input: $input) { id } }",
+                variables: {input: {name: $name, s3Key: $s3key, choreographyThemeId: $themeId,
+                                    buildDate: $now, isOriginal: false, sizeKb: $sizeKb}}}')"
+
+      - name: Mark build as failed
+        if: failure()
+        run: |
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+          curl -sf -X POST "${{ secrets.AMPLIFY_API_ENDPOINT }}" \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: ${{ secrets.AMPLIFY_API_KEY }}" \
+            -d "$(jq -n \
+              --arg jobId "${{ inputs.build_job_id }}" \
+              --arg now "$NOW" \
+              --arg runId "${{ github.run_id }}" \
+              '{query: "mutation UpdateBuildJob($input: UpdateBuildJobInput!) { updateBuildJob(input: $input) { id } }",
+                variables: {input: {id: $jobId, status: "failed", completedAt: $now,
+                                    errorMessage: ("GitHub Actions run " + $runId + " failed — check workflow logs.")}}}')" || true
