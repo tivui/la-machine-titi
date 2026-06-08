@@ -119,33 +119,74 @@ jobs:
           aws s3 cp image/la_machine.img \
             "s3://${{ secrets.S3_BUCKET }}/images/${{ inputs.theme_id }}/la_machine.img"
 
-      - name: Mark build as success + create ImageTheme
+      - name: Mark build as success + upsert ImageTheme + create Sound records
         run: |
           NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
           IMAGE_S3_KEY="images/${{ inputs.theme_id }}/la_machine.img"
+          EP="${{ secrets.AMPLIFY_API_ENDPOINT }}"
+          KEY="${{ secrets.AMPLIFY_API_KEY }}"
+          THEME_ID="${{ inputs.theme_id }}"
 
-          curl -sf -X POST "${{ secrets.AMPLIFY_API_ENDPOINT }}" \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: ${{ secrets.AMPLIFY_API_KEY }}" \
+          # 1. Update BuildJob → success
+          curl -sf -X POST "$EP" -H "Content-Type: application/json" -H "x-api-key: $KEY" \
             -d "$(jq -n \
-              --arg jobId "${{ inputs.build_job_id }}" \
-              --arg now "$NOW" \
-              --arg s3key "$IMAGE_S3_KEY" \
-              '{query: "mutation UpdateBuildJob($input: UpdateBuildJobInput!) { updateBuildJob(input: $input) { id } }",
-                variables: {input: {id: $jobId, status: "success", completedAt: $now, imageS3Key: $s3key}}}')"
+              --arg jobId "${{ inputs.build_job_id }}" --arg now "$NOW" --arg s3key "$IMAGE_S3_KEY" \
+              '{query:"mutation U($i:UpdateBuildJobInput!){updateBuildJob(input:$i){id}}",
+                variables:{i:{id:$jobId,status:"success",completedAt:$now,imageS3Key:$s3key}}}')"
 
-          curl -sf -X POST "${{ secrets.AMPLIFY_API_ENDPOINT }}" \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: ${{ secrets.AMPLIFY_API_KEY }}" \
-            -d "$(jq -n \
-              --arg name "${{ inputs.theme_name }}" \
-              --arg s3key "$IMAGE_S3_KEY" \
-              --arg themeId "${{ inputs.theme_id }}" \
-              --arg now "$NOW" \
-              --argjson sizeKb "$IMAGE_SIZE_KB" \
-              '{query: "mutation CreateImageTheme($input: CreateImageThemeInput!) { createImageTheme(input: $input) { id } }",
-                variables: {input: {name: $name, s3Key: $s3key, choreographyThemeId: $themeId,
-                                    buildDate: $now, isOriginal: false, sizeKb: $sizeKb}}}')"
+          # 2. Upsert ImageTheme — évite les doublons sur les rebuilds successifs
+          EXISTING_ID=$(curl -sf -X POST "$EP" -H "Content-Type: application/json" -H "x-api-key: $KEY" \
+            -d "$(jq -n --arg tid "$THEME_ID" \
+              '{query:"query{listImageThemes(filter:{choreographyThemeId:{eq:\($tid)}}){items{id}}}"}')" \
+            | jq -r '.data.listImageThemes.items[0].id // empty')
+
+          if [ -n "$EXISTING_ID" ]; then
+            echo "Updating existing ImageTheme: $EXISTING_ID"
+            curl -sf -X POST "$EP" -H "Content-Type: application/json" -H "x-api-key: $KEY" \
+              -d "$(jq -n \
+                --arg id "$EXISTING_ID" --arg name "${{ inputs.theme_name }}" \
+                --arg s3key "$IMAGE_S3_KEY" --arg now "$NOW" --argjson sizeKb "$IMAGE_SIZE_KB" \
+                '{query:"mutation U($i:UpdateImageThemeInput!){updateImageTheme(input:$i){id}}",
+                  variables:{i:{id:$id,name:$name,s3Key:$s3key,buildDate:$now,sizeKb:$sizeKb}}}')"
+            IMAGE_THEME_ID="$EXISTING_ID"
+
+            # Supprimer les anciens Sound records avant de les recréer
+            OLD_IDS=$(curl -sf -X POST "$EP" -H "Content-Type: application/json" -H "x-api-key: $KEY" \
+              -d "$(jq -n --arg id "$IMAGE_THEME_ID" \
+                '{query:"query{listSounds(filter:{imageThemeId:{eq:\($id)}}){items{id}}}"}')" \
+              | jq -r '.data.listSounds.items[].id')
+            for sid in $OLD_IDS; do
+              curl -sf -X POST "$EP" -H "Content-Type: application/json" -H "x-api-key: $KEY" \
+                -d "$(jq -n --arg id "$sid" \
+                  '{query:"mutation D($i:DeleteSoundInput!){deleteSound(input:$i){id}}",
+                    variables:{i:{id:$id}}}')"
+            done
+          else
+            echo "Creating new ImageTheme"
+            IMAGE_THEME_ID=$(curl -sf -X POST "$EP" -H "Content-Type: application/json" -H "x-api-key: $KEY" \
+              -d "$(jq -n \
+                --arg name "${{ inputs.theme_name }}" --arg s3key "$IMAGE_S3_KEY" \
+                --arg themeId "$THEME_ID" --arg now "$NOW" --argjson sizeKb "$IMAGE_SIZE_KB" \
+                '{query:"mutation C($i:CreateImageThemeInput!){createImageTheme(input:$i){id}}",
+                  variables:{i:{name:$name,s3Key:$s3key,choreographyThemeId:$themeId,
+                                buildDate:$now,isOriginal:false,sizeKb:$sizeKb}}}')" \
+              | jq -r '.data.createImageTheme.id')
+            echo "Created ImageTheme: $IMAGE_THEME_ID"
+          fi
+
+          # 3. Créer un Sound record pour chaque MP3 personnel
+          if [ -d sounds/personal ] && [ -n "$IMAGE_THEME_ID" ]; then
+            for f in sounds/personal/*.mp3; do
+              [ -f "$f" ] || continue
+              filename=$(basename "$f")
+              sname=$(echo "${filename%.mp3}" | sed 's/[-_]/ /g')
+              curl -sf -X POST "$EP" -H "Content-Type: application/json" -H "x-api-key: $KEY" \
+                -d "$(jq -n \
+                  --arg imgId "$IMAGE_THEME_ID" --arg name "$sname" --arg fn "personal/$filename" \
+                  '{query:"mutation C($i:CreateSoundInput!){createSound(input:$i){id}}",
+                    variables:{i:{imageThemeId:$imgId,name:$name,filename:$fn,isSystem:false}}}')"
+            done
+          fi
 
       - name: Mark build as failed
         if: failure()
