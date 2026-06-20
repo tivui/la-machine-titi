@@ -51,6 +51,9 @@ jobs:
     runs-on: ubuntu-24.04
     container: erlang:28
     environment: ${{ inputs.environment }}
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout
