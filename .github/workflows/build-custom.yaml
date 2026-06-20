@@ -160,7 +160,8 @@ jobs:
           # 2. Upsert ImageTheme — évite les doublons sur les rebuilds successifs
           EXISTING_ID=$(curl -sf -X POST "$EP" -H "Content-Type: application/json" -H "x-api-key: $KEY" \
             -d "$(jq -n --arg tid "$THEME_ID" \
-              '{query:"query{listImageThemes(filter:{choreographyThemeId:{eq:\($tid)}}){items{id}}}"}')" \
+              '{query:"query L($tid:ID){listImageThemes(filter:{choreographyThemeId:{eq:$tid}}){items{id}}}",
+                variables:{tid:$tid}}')" \
             | jq -r '.data.listImageThemes.items[0].id // empty')
 
           if [ -n "$EXISTING_ID" ]; then
@@ -176,7 +177,8 @@ jobs:
             # Supprimer les anciens Sound records avant de les recréer
             OLD_IDS=$(curl -sf -X POST "$EP" -H "Content-Type: application/json" -H "x-api-key: $KEY" \
               -d "$(jq -n --arg id "$IMAGE_THEME_ID" \
-                '{query:"query{listSounds(filter:{imageThemeId:{eq:\($id)}}){items{id}}}"}')" \
+                '{query:"query L($id:ID){listSounds(filter:{imageThemeId:{eq:$id}}){items{id}}}",
+                  variables:{id:$id}}')" \
               | jq -r '.data.listSounds.items[].id')
             for sid in $OLD_IDS; do
               curl -sf -X POST "$EP" -H "Content-Type: application/json" -H "x-api-key: $KEY" \
