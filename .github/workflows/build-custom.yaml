@@ -88,8 +88,22 @@ jobs:
 
       - name: Sync sounds from S3
         run: |
-          aws s3 sync "s3://${{ secrets.S3_BUCKET }}/sounds/" sounds/
-          echo "Sounds available: $(ls sounds/ | wc -l) directories/files"
+          # Sync all non-personal sounds (system, original — meuh, calling, joy, hits, _other, _system)
+          aws s3 sync "s3://${{ secrets.S3_BUCKET }}/sounds/" sounds/ --exclude "personal/*"
+
+          # Only sync personal sounds actually referenced in the custom choreographies
+          REFERENCED=$(jq -r '[.[] | scan("personal/[^\"\\\\]+\\.mp3")] | unique[]' custom_choreos.json || true)
+          if [ -n "$REFERENCED" ]; then
+            mkdir -p sounds/personal
+            while IFS= read -r path; do
+              echo "Syncing referenced sound: $path"
+              aws s3 cp "s3://${{ secrets.S3_BUCKET }}/sounds/$path" "sounds/$path" || \
+                echo "WARNING: $path not found in S3 — choreography will have no audio"
+            done <<< "$REFERENCED"
+          else
+            echo "No personal sounds referenced in this theme's choreographies"
+          fi
+          echo "Sounds synced: $(find sounds/ -name '*.mp3' | wc -l) files"
 
       - name: Compile (generates sounds.bin + HRL)
         run: rebar3 compile
@@ -180,18 +194,24 @@ jobs:
             echo "Created ImageTheme: $IMAGE_THEME_ID"
           fi
 
-          # 3. Créer un Sound record pour chaque MP3 personnel
-          if [ -d sounds/personal ] && [ -n "$IMAGE_THEME_ID" ]; then
-            for f in sounds/personal/*.mp3; do
-              [ -f "$f" ] || continue
-              filename=$(basename "$f")
-              sname=$(echo "${filename%.mp3}" | sed 's/[-_]/ /g')
-              curl -sf -X POST "$EP" -H "Content-Type: application/json" -H "x-api-key: $KEY" \
-                -d "$(jq -n \
-                  --arg imgId "$IMAGE_THEME_ID" --arg name "$sname" --arg fn "personal/$filename" \
-                  '{query:"mutation C($i:CreateSoundInput!){createSound(input:$i){id}}",
-                    variables:{i:{imageThemeId:$imgId,name:$name,filename:$fn,isSystem:false}}}')"
-            done
+          # 3. Créer un Sound record uniquement pour les sons personnels référencés dans les chorés du thème
+          if [ -n "$IMAGE_THEME_ID" ]; then
+            REFERENCED=$(jq -r '[.[] | scan("personal/[^\"\\\\]+\\.mp3")] | unique[]' custom_choreos.json || true)
+            if [ -n "$REFERENCED" ]; then
+              while IFS= read -r personal_path; do
+                [ -n "$personal_path" ] || continue
+                filename=$(basename "$personal_path")
+                sname=$(echo "${filename%.mp3}" | sed 's/[-_]/ /g')
+                curl -sf -X POST "$EP" -H "Content-Type: application/json" -H "x-api-key: $KEY" \
+                  -d "$(jq -n \
+                    --arg imgId "$IMAGE_THEME_ID" --arg name "$sname" --arg fn "$personal_path" \
+                    '{query:"mutation C($i:CreateSoundInput!){createSound(input:$i){id}}",
+                      variables:{i:{imageThemeId:$imgId,name:$name,filename:$fn,isSystem:false}}}')"
+                echo "Sound record created: $personal_path"
+              done <<< "$REFERENCED"
+            else
+              echo "No personal Sound records to create for this theme"
+            fi
           fi
 
       - name: Mark build as failed
